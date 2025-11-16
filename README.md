@@ -8,28 +8,45 @@ Getting VPN port forwarding set up when using containers can be a pain since the
 
 1. Download a recent version from [releases](https://github.com/jawilson/deluge-piaportplugin/releases).
 2. Add to Deluge by going to Preferences -> Plugins -> Install.
-3. Create a file called `forwarded_port` containing a port number and mount it under `/pia` in the Deluge container (so full path should be `/pia/forwarded_port`).
+3. Enable the Gluetun control server and ensure network connectivity between Deluge and Gluetun containers.
 
-	When using Docker Compose, this can be accomplished with:
+	When using Docker Compose, configure both containers on the same network:
 
 	```yaml
-	vpn:
-	   image: qmcgaw/gluetun:latest
-	   ...
-	   environment:
-	     ...
-	     PORT_FORWARDING: 'on'
-	     PORT_FORWARDING_STATUS_FILE: "/gluetun/forwarded_port"
-	   volumes:
-	     - ./gluetun:/gluetun
+	services:
+	  vpn:
+	    image: qmcgaw/gluetun:latest
+	    ...
+	    environment:
+	      ...
+	      PORT_FORWARDING: 'on'
+	      HTTP_CONTROL_SERVER: 'on'
+	    networks:
+	      - vpn_network
 
-	deluge:
+	  deluge:
 	    image: ghcr.io/linuxserver/deluge:latest
 	    ...
-	    volumes:
-	      ...
-	      - ./gluetun:/pia:ro
+	    depends_on:
+	      - vpn
+	    networks:
+	      - vpn_network
+
+	networks:
+	  vpn_network:
+	    driver: bridge
 	```
 
-4. Make sure you're using a VPN region that supports port forwarding. Here's [a list for PIA](https://www.privateinternetaccess.com/pages/client-support/#portforward).
+4. Configure the plugin in Deluge Preferences -> Plugins -> PIAPortPlugin:
+   - **Gluetun Host**: The hostname or IP of your Gluetun container (e.g., `vpn` if using Docker Compose on the same network, or `localhost` if on the host)
+   - **Gluetun Port**: The control server port (default: `8000`)
+   - **Poll Interval**: How often to check if the port is blocked (in seconds, default: `300`)
+
+5. Make sure you're using a VPN region that supports port forwarding. Here's [a list for PIA](https://www.privateinternetaccess.com/pages/client-support/#portforward).
+
+## Notes
+
+- The plugin fetches the forwarded port from the Gluetun control server API (`GET /v1/portforward`).
+- No file mounting or port file is needed anymore.
+- The control server must be accessible from the Deluge container.
 

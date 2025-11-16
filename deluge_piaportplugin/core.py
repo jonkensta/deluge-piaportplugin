@@ -8,6 +8,7 @@
 # the OpenSSL library. See LICENSE for more details.
 from __future__ import unicode_literals
 
+import json
 import logging
 import sys
 
@@ -16,11 +17,14 @@ from deluge.core.rpcserver import export
 from deluge.plugins.pluginbase import CorePluginBase
 import deluge.component as component
 from twisted.internet.task import LoopingCall
+from twisted.web.client import readBody, Agent
+from twisted.internet import reactor
 
 log = logging.getLogger(__name__)
 
 DEFAULT_PREFS = {
-    'port_file': '/pia/forwarded_port',
+    'gluetun_host': 'localhost',
+    'gluetun_port': 8000,
     'poll_interval': 300
 }
 
@@ -48,22 +52,71 @@ class Core(CorePluginBase):
                         "blocked" or "not blocked")))
             if blocked:
                 log.info("Attempting to update listen port")
-                try:
-                    port = int(open(self.config["port_file"], 'r').read())
-                except:
-                    log.error("Failed to open and read port file: %s" % sys.exc_info()[1])
-                    return
-
-                if core.get_listen_port() == port:
-                    log.warning("Current port file lists blocked port: %d" % port)
-                    return
-
-                core.set_config({"listen_ports": [port, port]})
-                torrents = core.get_session_state()
-                core.force_reannounce(torrents)
-                log.info("Updated listen port to: %d" % port)
+                d = self._fetch_gluetun_port()
+                d.addCallback(self._update_deluge_port, core)
+                d.addErrback(self._handle_fetch_error)
+                return d
 
         core.test_listen_port().addCallback(update_port)
+
+    def _fetch_gluetun_port(self):
+        """Fetch the forwarded port from gluetun API"""
+        host = self.config["gluetun_host"]
+        port = int(self.config["gluetun_port"])
+        url = "http://%s:%d/v1/portforward" % (host, port)
+
+        log.debug("Fetching port from gluetun at %s" % url)
+        agent = Agent(reactor)
+        d = agent.request(
+            b'GET',
+            url.encode('utf-8'),
+            None,
+            None
+        )
+        d.addCallback(self._parse_gluetun_response)
+        return d
+
+    def _parse_gluetun_response(self, response):
+        """Parse the JSON response from gluetun API"""
+        if response.code != 200:
+            raise Exception("Gluetun API returned status code %d" % response.code)
+
+        d = readBody(response)
+        d.addCallback(self._extract_port_from_body)
+        return d
+
+    def _extract_port_from_body(self, body):
+        """Extract port number from JSON response body"""
+        try:
+            data = json.loads(body.decode('utf-8'))
+            port = int(data.get('port'))
+            log.debug("Parsed port from gluetun: %d" % port)
+            return port
+        except Exception as e:
+            raise Exception("Failed to parse gluetun response: %s" % str(e))
+
+    def _update_deluge_port(self, port, core):
+        """Update Deluge's listening port"""
+        current_port = core.get_listen_port()
+
+        if current_port == port:
+            log.warning("Port from gluetun is same as current port: %d" % port)
+            return
+
+        log.info("Attempting to update listen port from %d to %d" % (current_port, port))
+
+        try:
+            core.set_config({"listen_ports": [port, port]})
+            torrents = core.get_session_state()
+            core.force_reannounce(torrents)
+            log.info("Updated listen port to: %d" % port)
+        except Exception as e:
+            log.error("Failed to update listen port: %s" % str(e))
+            raise
+
+    def _handle_fetch_error(self, failure):
+        """Handle errors when fetching port from gluetun"""
+        log.error("Failed to fetch port from gluetun: %s" % failure.getErrorMessage())
 
     @export
     def set_config(self, config):
