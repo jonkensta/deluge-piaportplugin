@@ -13,41 +13,45 @@ This guide provides step-by-step instructions to install the PIAPortPlugin on yo
 
 Looking at your docker-compose.yml, **Deluge uses `network_mode: "service:gluetun"`**, which means Deluge shares Gluetun's network stack. This is important for the plugin configuration.
 
-## Step 1: Enable Gluetun Control Server
+## Step 1: Verify Gluetun Control Server Access
 
-Update your `~/Source/mediacenter/docker-compose.yml` to enable the HTTP control server in the Gluetun service:
+The Gluetun control server typically runs on port `8000` by default. Depending on your Gluetun version, you may need to:
 
-```yaml
-gluetun:
-  image: qmcgaw/gluetun
-  container_name: gluetun
-  cap_add:
-    - NET_ADMIN
-  environment:
-    - PUID=1012
-    - PGID=1012
-    - TZ=America/Chicago
-    - VPN_SERVICE_PROVIDER=private internet access
-    - VPN_TYPE=openvpn
-    - OPENVPN_USER=YOUR_VPN_USERNAME
-    - OPENVPN_PASSWORD=YOUR_VPN_PASSWORD
-    - PORT_FORWARD_ONLY=true
-    - VPN_PORT_FORWARDING=on
-    - HTTP_CONTROL_SERVER=on  # ADD THIS LINE
-    - HTTP_CONTROL_SERVER_ADDRESS=0.0.0.0:8000  # ADD THIS LINE (optional, but recommended for clarity)
-  volumes:
-    - ./gluetun:/gluetun
-  devices:
-    - /dev/net/tun:/dev/net/tun
-  restart: unless-stopped
-```
+1. **Expose port 8000** (if using host networking or need external access):
+   ```yaml
+   gluetun:
+     image: qmcgaw/gluetun
+     container_name: gluetun
+     cap_add:
+       - NET_ADMIN
+     environment:
+       - PUID=1012
+       - PGID=1012
+       - TZ=America/Chicago
+       - VPN_SERVICE_PROVIDER=private internet access
+       - VPN_TYPE=openvpn
+       - OPENVPN_USER=YOUR_VPN_USERNAME
+       - OPENVPN_PASSWORD=YOUR_VPN_PASSWORD
+       - PORT_FORWARD_ONLY=true
+       - VPN_PORT_FORWARDING=on
+     volumes:
+       - ./gluetun:/gluetun
+     devices:
+       - /dev/net/tun:/dev/net/tun
+     ports:
+       - 8000:8000/tcp  # OPTIONAL: Add if you need external access to the control server
+     restart: unless-stopped
+   ```
 
-Then restart Gluetun:
+2. **Verify the control server is accessible**:
+   ```bash
+   # From the Deluge container (which shares Gluetun's network)
+   docker exec mediacenter_deluge_1 curl http://localhost:8000/v1/portforward
+   ```
 
-```bash
-cd ~/Source/mediacenter
-docker-compose restart gluetun
-```
+   You should see a response like: `{"port":12345}`
+
+3. If the control server is not responding, check the Gluetun documentation for your specific version or consult the [Gluetun control server documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md)
 
 ## Step 2: Build the Plugin
 
@@ -196,7 +200,9 @@ docker exec mediacenter_deluge_1 curl -v http://localhost:8000/v1/portforward
 If this fails:
 1. Verify Gluetun is running: `docker ps | grep gluetun`
 2. Check Gluetun logs: `docker logs gluetun`
-3. Verify HTTP_CONTROL_SERVER=on in gluetun environment
+3. Verify the control server port (8000) is correctly configured in your Gluetun setup
+4. Check your Gluetun version - the control server availability may vary by version
+5. Consult the [Gluetun control server documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md) for your specific version
 
 ### Port not updating
 
