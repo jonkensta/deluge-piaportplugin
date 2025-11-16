@@ -15,43 +15,20 @@ Looking at your docker-compose.yml, **Deluge uses `network_mode: "service:gluetu
 
 ## Step 1: Verify Gluetun Control Server Access
 
-The Gluetun control server typically runs on port `8000` by default. Depending on your Gluetun version, you may need to:
+The Gluetun control server runs on port `8000` by default and is already accessible from the Deluge container since it shares Gluetun's network stack.
 
-1. **Expose port 8000** (if using host networking or need external access):
-   ```yaml
-   gluetun:
-     image: qmcgaw/gluetun
-     container_name: gluetun
-     cap_add:
-       - NET_ADMIN
-     environment:
-       - PUID=1012
-       - PGID=1012
-       - TZ=America/Chicago
-       - VPN_SERVICE_PROVIDER=private internet access
-       - VPN_TYPE=openvpn
-       - OPENVPN_USER=YOUR_VPN_USERNAME
-       - OPENVPN_PASSWORD=YOUR_VPN_PASSWORD
-       - PORT_FORWARD_ONLY=true
-       - VPN_PORT_FORWARDING=on
-     volumes:
-       - ./gluetun:/gluetun
-     devices:
-       - /dev/net/tun:/dev/net/tun
-     ports:
-       - 8000:8000/tcp  # OPTIONAL: Add if you need external access to the control server
-     restart: unless-stopped
-   ```
+Verify the control server is working with:
 
-2. **Verify the control server is accessible**:
-   ```bash
-   # From the Deluge container (which shares Gluetun's network)
-   docker exec mediacenter_deluge_1 curl http://localhost:8000/v1/portforward
-   ```
+```bash
+docker exec deluge curl -s http://localhost:8000/v1/portforward
+```
 
-   You should see a response like: `{"port":12345}`
+You should see a response like:
+```json
+{"port":12345}
+```
 
-3. If the control server is not responding, check the Gluetun documentation for your specific version or consult the [Gluetun control server documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md)
+If you get a connection error, consult the [Gluetun control server documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md) for your specific version.
 
 ## Step 2: Build the Plugin
 
@@ -122,15 +99,12 @@ docker logs -f mediacenter_deluge_1 | grep -i "portplugin\|piaport"
 Verify that Gluetun's control server is responding:
 
 ```bash
-# Access the Deluge container's network
-docker exec gluetun curl -s http://localhost:8000/v1/portforward | jq .
+docker exec deluge curl -s http://localhost:8000/v1/portforward
 ```
 
 You should see output like:
 ```json
-{
-  "port": 12345
-}
+{"port":12345}
 ```
 
 ### Monitor Plugin Activity
@@ -190,19 +164,17 @@ deluge:
 
 ### Plugin can't reach Gluetun control server
 
-Since Deluge shares Gluetun's network (`network_mode: "service:gluetun"`), the following should work:
+Test if the control server is accessible:
 
 ```bash
-# Test from Deluge container
-docker exec mediacenter_deluge_1 curl -v http://localhost:8000/v1/portforward
+docker exec deluge curl -s http://localhost:8000/v1/portforward
 ```
 
-If this fails:
+If this fails with a connection error:
 1. Verify Gluetun is running: `docker ps | grep gluetun`
 2. Check Gluetun logs: `docker logs gluetun`
-3. Verify the control server port (8000) is correctly configured in your Gluetun setup
-4. Check your Gluetun version - the control server availability may vary by version
-5. Consult the [Gluetun control server documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md) for your specific version
+3. Verify your Gluetun version supports the control server
+4. Consult the [Gluetun control server documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md) for your specific version
 
 ### Port not updating
 
